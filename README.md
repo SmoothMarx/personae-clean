@@ -143,24 +143,11 @@ what it knows.*
 
 ## 📁 Files
 
-A second tile beside **Scheduled jobs** on the right edge, showing the **folder tree of the
-backend's disk** — the machine the sessions actually run on, which is not necessarily the
-machine drawing the window. Read-only, deliberately:
-
-- One request per folder, made when you open it, so a deep tree costs a small read per level
-  instead of one enormous walk; `/files` has no write counterpart at all.
-- Rooted at the backend user's home and **refusing anything that escapes it** (`resolve()`,
-  so a symlink cannot walk out either). A refusal says so — an empty tree would read as an
-  empty folder.
-- Folders first, then names, case-insensitively; files carry a human size; dotfiles are drawn
-  dimmed rather than hidden, because half of what matters on a dev box starts with a dot.
-- Breadcrumb and **Up** walk the tree; **Refresh** re-reads the open folders.
-- **Click a file to preview it** — read-only text, capped at 256 KB, binary files named as
-  such instead of decoded into mojibake, and **Back** to the tree.
-- **Right-click** carries the rest: *Preview*, *Open in editor*, *Show in file manager*,
-  *Copy path*. The two "open" verbs act on the **backend** — the machine the paths live on —
-  so a headless backend answers honestly ("no desktop session — set `PERSONAE_EDITOR`")
-  rather than looking like a dead menu item.
+Personae does not ship a file tree. The desktop already has one — a real tree with preview,
+reveal, download (including from a remote), rename and delete — and a second one would only
+ever be a worse copy that drifts. The toolbar's **Files** button (`files` glyph) asks the app
+to open its own browser via the built-in view action (`view.showFiles`), which is why it keeps
+working when you rebind the shortcut. The default chord is **⌘J** (*Toggle file browser*).
 
 ## 🎨 Colour
 

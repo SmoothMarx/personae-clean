@@ -32,6 +32,8 @@ const harness = () => {
     colors: [],
     errors: [],
     rest: { calls: [] },
+    /** Built-in app actions the plugin ran (`ctx.runAction`). */
+    actions: [],
     sessions: {},
     storage: {},
     toasts: [],

@@ -152,6 +152,13 @@ h.sessions.byProfile = {
 
 const contributions = []
 const ctx = {
+  /** The app's built-in VIEW actions a plugin may run (`view.showFiles`, …).
+   *  Recorded so a test can prove the bridge asks for the ACTION, not a chord. */
+  runAction: async id => {
+    h.actions.push(id)
+
+    return { ok: true }
+  },
   i18n: { register: bundle => Object.assign(h.i18n, bundle.en) },
   register: c => contributions.push(c),
   storage: {
@@ -186,9 +193,8 @@ plugin.register(ctx)
 
 check('plugin id is the folder name', plugin.id === 'personae', `got ${plugin.id}`)
 check(
-  'three contributions: the roster pane, Scheduled jobs and Files',
-  contributions.length === 3 && contributions.every(c => c.area === 'panes'),
-  contributions.map(c => c.id).join(', '),
+  'two contributions: the roster pane and the Scheduled jobs tile',
+  contributions.length === 2 && contributions.every(c => c.area === 'panes'),
   contributions.map(c => c.id).join(', ')
 )
 
@@ -7959,183 +7965,53 @@ h.rest.byProfile = {}
   __internals.$sessionGroups.set({})
 }
 
-// ── Files: a folder tree beside Scheduled jobs (2026-10-17) ─────────────────
+// ── The file browser: ask the app for ITS pane, never build a second tree ───
 {
-  const filesPane = contributions.find(entry => entry.id === 'files') || {}
+  h.actions.length = 0
+
+  const asked = await __internals.openCoreFiles()
 
   check(
-    '"Files" docks where Scheduled jobs does, collapsed, so the two are tabs',
-    filesPane.data?.placement === 'main' &&
-      filesPane.data?.dock?.pane === 'workspace' &&
-      filesPane.data?.dock?.pos === 'right' &&
-      filesPane.data?.defaultCollapsed === true,
-    JSON.stringify(filesPane.data)
-  )
-  check('its tab says Files', filesPane.title === 'Files', filesPane.title)
-
-  check(
-    'a tree lists folders before files, case-insensitively',
-    JSON.stringify(
-      __internals
-        .sortFileEntries([{ name: 'b.txt' }, { name: 'Zeta', dir: true }, { name: 'alpha', dir: true }, { name: 'A.txt' }])
-        .map(entry => entry.name)
-    ) === JSON.stringify(['alpha', 'Zeta', 'A.txt', 'b.txt']),
-    JSON.stringify(__internals.sortFileEntries([{ name: 'b.txt' }, { name: 'Zeta', dir: true }]))
+    'the Files button runs the app’s own view action, not a chord',
+    asked === true && h.actions.includes('view.showFiles'),
+    JSON.stringify(h.actions)
   )
   check(
-    'the breadcrumb starts at the backend home and walks down, never inventing a level',
-    JSON.stringify(__internals.fileBreadcrumb('/home/you/Projects/app', '/home/you').map(c => c.name)) ===
-      JSON.stringify(['you', 'Projects', 'app']),
-    JSON.stringify(__internals.fileBreadcrumb('/home/you/Projects/app', '/home/you'))
-  )
-  check(
-    'a file size is human, not a byte count',
-    __internals.fileSizeLabel(999) === '999 B' &&
-      __internals.fileSizeLabel(2048) === '2 KB' &&
-      __internals.fileSizeLabel(5 * 1024 * 1024) === '5.0 MB',
-    [999, 2048, 5 * 1024 * 1024].map(__internals.fileSizeLabel).join(' / ')
+    'it asks for the action id, so a rebound shortcut changes nothing',
+    h.actions.every(id => id === 'view.showFiles') && !JSON.stringify(h.actions).includes('mod+'),
+    JSON.stringify(h.actions)
   )
 
-  h.queryResults['personae|files|'] = {
-    data: {
-      count: 3,
-      entries: [
-        { dir: true, name: 'Projects', size: 4096 },
-        { dir: false, name: 'notes.md', size: 1024 },
-        { dir: false, name: 'a.txt', size: 12 }
-      ],
-      home: '/home/you',
-      parent: '',
-      path: '/home/you'
-    },
-    isPending: false
-  }
+  // An older desktop has no runAction: say so, do not pretend the pane opened.
+  const realRun = ctx.runAction
+  const seen = []
 
-  const html = renderToStaticMarkup(filesPane.render())
+  delete ctx.runAction
+  h.notifyErrors = []
+  host.notifyError = (error, title) => seen.push([String(error?.message || error), title])
+
+  const missing = await __internals.openCoreFiles()
 
   check(
-    'the tree draws the folder it was given, folders first, with sizes on files',
-    html.includes('data-files-row="dir"') &&
-      html.includes('Projects') &&
-      html.indexOf('Projects') < html.indexOf('notes.md') &&
-      html.includes('1 KB'),
-    html.slice(0, 400)
-  )
-  check(
-    'and the path bar names the folder being listed',
-    html.includes('data-files-path="/home/you"'),
-    html.slice(0, 300)
+    'a desktop without the action API says it cannot, instead of failing silently',
+    missing === false && seen.length === 1 && /update Hermes Desktop/i.test(seen[0][0]),
+    JSON.stringify(seen)
   )
 
-  // A refusal has to be VISIBLE: an empty tree would read as an empty folder.
-  h.queryResults['personae|files|'] = {
-    data: { entries: [], error: 'outside_root', home: '/home/you', path: '/etc' },
-    isPending: false
-  }
+  ctx.runAction = realRun
+  delete host.notifyError
 
-  const refused = renderToStaticMarkup(filesPane.render())
-
-  check(
-    'a folder outside the allowed root SAYS so instead of looking empty',
-    refused.includes('data-files-note="outside_root"'),
-    refused.slice(0, 300)
-  )
-
-  delete h.queryResults['personae|files|']
-}
-
-// ── Files: preview + the right-click verbs (2026-10-17) ─────────────────────
-{
-  const pane = contributions.find(entry => entry.id === 'files') || {}
-
-  h.rest.calls.length = 0
-  h.rest.writes = []
-  h.rest.byProfile = {}
-
-  // 1. The click verb: a preview that reads the file, and nothing else.
-  h.queryResults['personae|file|/home/you/notes.md'] = {
-    data: { binary: false, error: null, lines: 2, path: '/home/you/notes.md', size: 2048, text: 'first line\nsecond line', truncated: false },
-    isPending: false
-  }
-
-  const shown = renderToStaticMarkup(
-    jsx(__internals.filePreview, {
-      name: 'notes.md',
-      onBack: () => {},
-      path: '/home/you/notes.md',
-      t: key => key
-    })
-  )
-
-  check(
-    'clicking a file PREVIEWS it: the text, its path, and a way back',
-    shown.includes('data-files-preview=""') &&
-      shown.includes('first line') &&
-      shown.includes('second line') &&
-      shown.includes('data-files-preview-path="/home/you/notes.md"') &&
-      shown.includes('data-files-back=""'),
-    shown.slice(0, 300)
-  )
-
-  // 2. A binary file is stated, never decoded into mojibake.
-  h.queryResults['personae|file|/home/you/logo.png'] = {
-    data: { binary: true, error: null, path: '/home/you/logo.png', size: 4096, text: '' },
-    isPending: false
-  }
-
-  const png = renderToStaticMarkup(
-    jsx(__internals.filePreview, { name: 'logo.png', onBack: () => {}, path: '/home/you/logo.png', t: key => key })
-  )
-
-  check('a binary file says so instead of decoding itself', png.includes('data-files-note="binary"'), png.slice(0, 240))
-
-  // 3. The read is a GET on the path, and the open verbs are POSTs on /open.
-  const read = await __internals.readFilePreview('/home/you/notes.md')
-
-  check(
-    'the preview read is one GET of that path',
-    h.rest.calls.includes('/file?path=%2Fhome%2Fyou%2Fnotes.md') && read !== undefined,
-    JSON.stringify(h.rest.calls.slice(-3))
-  )
-
-  h.rest.byProfile = {}
-  const opened = await __internals.openOnBackend('/home/you/notes.md', 'editor')
-
-  check(
-    'opening in an editor POSTs the path and the target',
-    h.rest.writes?.some(
-      entry => entry.path === '/open' && entry.method === 'POST' && entry.body?.path === '/home/you/notes.md' && entry.body?.target === 'editor'
-    ) && opened !== undefined,
-    JSON.stringify(h.rest.writes)
-  )
-
-  // 4. The four menu verbs live on the ROW, and the click is Preview.
+  // The button lives in the toolbar and calls that bridge — not a tab of ours.
   const src = readFileSync(new URL('./plugin.js', import.meta.url), 'utf8')
-  const at = src.indexOf('function FileRow(')
-  // …to the NEXT declaration: FileDirectory is defined ABOVE FileRow, so slicing
-  // to it by name yields an empty (and silently passing) window.
-  const row = src.slice(at, src.indexOf('\nfunction ', at + 10))
-  const menu = row.slice(row.indexOf('return jsx(ContextMenu'))
+  const at = src.indexOf('function Toolbar(')
+  const toolbar = src.slice(at, src.indexOf('\nfunction ', at + 10))
 
   check(
-    'right-click offers Preview, Open in editor, Show in file manager, Copy path',
-    ['filesPreview', 'filesOpenEditor', 'filesShowFolder', 'filesCopyPath'].every(key => menu.includes(key)),
-    menu.slice(0, 400)
+    'the toolbar carries the Files button, wired to the bridge',
+    toolbar.includes('onClick: onFiles') &&
+      toolbar.includes("name: 'files'"),
+    toolbar.slice(0, 300)
   )
-  check(
-    'and a plain click is the preview — the row carries no other click verb',
-    row.includes("onClick: entry.dir ? () => onToggle(full) : () => acts.preview()"),
-    row.slice(0, 400)
-  )
-  check(
-    'a directory does not offer a preview it cannot produce',
-    /entry\.dir\s*\n?\s*\?\s*null/.test(menu),
-    menu.slice(0, 300)
-  )
-
-  delete h.queryResults['personae|file|/home/you/notes.md']
-  delete h.queryResults['personae|file|/home/you/logo.png']
-  h.rest.byProfile = {}
 }
 
 const failedNow = results.filter(r => !r.ok)
