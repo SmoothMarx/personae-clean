@@ -8057,6 +8057,52 @@ h.rest.byProfile = {}
   h.rest.byProfile = {}
 }
 
+// ── The strip follows the pane: rename repaints a tab, archive removes it ────
+{
+  h.tiles.length = 0
+  h.rest.byProfile = { zulu: { ok: true, session_key: 'sess-zulu-9', title: 'Renamed' } }
+
+  await __internals.renameSession({ id: 'sess-zulu-9' }, 'zulu', 'Renamed')
+
+  check(
+    'a rename reaches the TAB: the row it is named from is patched',
+    h.tiles.some(entry => entry.op === 'retitle' && entry.id === 'sess-zulu-9' && entry.title === 'Renamed'),
+    JSON.stringify(h.tiles)
+  )
+
+  h.tiles.length = 0
+  h.responses['session.archive'] = () => ({ ok: true })
+
+  await __internals.archiveSessionEntry({ profile: 'zulu', session_id: 'sess-zulu-9' })
+
+  check(
+    'an archived session leaves the STRIP too, not just the list',
+    h.tiles.some(entry => entry.op === 'close' && entry.id === 'sess-zulu-9'),
+    JSON.stringify(h.tiles)
+  )
+
+  // Feature-detect: a desktop without the verbs must not explode.
+  const realRetitle = host.retitleSessionTile
+  const realClose = host.closeSessionTile
+
+  delete host.retitleSessionTile
+  delete host.closeSessionTile
+  h.tiles.length = 0
+
+  const kept = await __internals.archiveSessionEntry({ profile: 'zulu', session_id: 'sess-zulu-9' })
+
+  check(
+    'an older desktop simply keeps the tab instead of throwing',
+    kept !== false && h.tiles.length === 0,
+    JSON.stringify(kept)
+  )
+
+  host.retitleSessionTile = realRetitle
+  host.closeSessionTile = realClose
+  h.rest.byProfile = {}
+  delete h.responses['session.archive']
+}
+
 const failedNow = results.filter(r => !r.ok)
 
 console.log(`\n${results.length - failedNow.length}/${results.length} passed`)

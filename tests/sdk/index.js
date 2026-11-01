@@ -34,6 +34,8 @@ const harness = () => {
     rest: { calls: [] },
     /** Built-in app actions the plugin ran (`ctx.runAction`). */
     actions: [],
+    /** Tile verbs the plugin asked the app for (retitle / close). */
+    tiles: [],
     sessions: {},
     storage: {},
     toasts: [],
@@ -126,6 +128,18 @@ export const host = {
     if (options?.keepAllProfilesScope === false && options?.profile) {
       host.state.profile.set(String(options.profile))
     }
+  },
+  /** Retitle one session tile (the app patches the row the tab is named from). */
+  retitleSessionTile(id, title) {
+    harness().tiles.push({ id: String(id), op: 'retitle', title: String(title) })
+
+    return true
+  },
+  /** Remove one session tile, exactly as its ✕ would. */
+  closeSessionTile(id) {
+    harness().tiles.push({ id: String(id), op: 'close' })
+
+    return true
   },
   /** Sessions of another profile, read through the source primary. */
   async listPersistedSessions(route, options) {

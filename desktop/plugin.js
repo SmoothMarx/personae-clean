@@ -3874,7 +3874,18 @@ function closeSession(entry) {
 
 /** Archive one session — the same call the single-row menu makes. */
 function archiveSessionEntry(entry) {
-  return archiveSession(entry.session_id, entry.profile)
+  const storedId = String(entry?.session_id || '')
+
+  return archiveSession(storedId, entry.profile).then(answer => {
+    // The tab has to go with the row: a tile outlives its session, so without
+    // this the strip keeps offering a chat no list shows any more (Pedro,
+    // 2026-10-17). Feature-detected — an older desktop simply keeps the tile.
+    if (answer !== false && storedId) {
+      host.closeSessionTile?.(storedId)
+    }
+
+    return answer
+  })
 }
 
 /** Run one verb over the batch. Each call carries its OWN profile: a bare
@@ -4016,6 +4027,12 @@ async function renameSession(session, profile, title) {
       // A live id that the gateway no longer holds is not a rename failure.
     }
   }
+
+  // The strip names a tab from its session ROW, and the app only re-reads rows
+  // when its own list churns — which never happens for a write made over this
+  // backend. Patching the row is what makes a rename reach the tab (Pedro,
+  // 2026-10-17). Feature-detected: an older desktop simply keeps the old caption.
+  host.retitleSessionTile?.(storedId, name)
 
   return true
 }
@@ -4766,6 +4783,7 @@ async function deleteSessionEntry(entry) {
   // The session is gone from core, so the pane's records of it go too —
   // otherwise an Apropos child comes back as a synthetic row on the next render.
   forgetDeletedSession(profile, sessionId, aliases)
+  host.closeSessionTile?.(sessionId)
 
   return true
 }
