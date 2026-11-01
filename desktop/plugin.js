@@ -1245,7 +1245,7 @@ function sessionGroupShell(block, parts, dragging, profileFill) {
             'div',
             {
               'data-profile-fill': '',
-              className: 'my-0.5 flex min-w-0 flex-col gap-0.5 rounded-md',
+              className: 'mt-0.5 mb-0.5 flex min-w-0 flex-col gap-0.5 rounded-md',
               style: { background: profileColorSoft(fill, 22) },
               children: members ?? null
             },
@@ -1267,7 +1267,7 @@ function sessionGroupShell(block, parts, dragging, profileFill) {
         // attribute lives here and the heading keeps its own.
         'data-drop-group-box': block.id,
         className: cn(
-          'my-0.5 flex min-w-0 flex-col rounded-md border border-(--ui-stroke-secondary) p-0.5',
+          'mt-0.5 mb-0.5 flex min-w-0 flex-col rounded-md border border-(--ui-stroke-secondary) p-0.5',
           dragging && 'opacity-60'
         ),
         // The FILL is the whole box: header included, which is what Pedro asked
@@ -3502,7 +3502,7 @@ function switchingFlags(profile) {
   return profileIsActive(profile) ? null : { keepAllProfilesScope: false }
 }
 
-function dockSessions(profile, sessions, exceptOpenId = null) {
+function dockSessions(profile, sessions, exceptOpenId = null, options = {}) {
   const name = String(profile || '')
   const except = String(exceptOpenId || '')
   const dock = (sessions || [])
@@ -3515,25 +3515,37 @@ function dockSessions(profile, sessions, exceptOpenId = null) {
 
   const open = (session, flags) =>
     openSession(sessionIdOf(session), name, 'tab', flags ? { ...INTENT_OPEN, ...flags } : INTENT_OPEN)
-  const switching = switchingFlags(name)
+  const [firstTab, ...restTabs] = dock
+  const rest = () => {
+    restTabs.forEach(session => open(session))
 
-  if (!switching) {
+    return dock.length
+  }
+
+  // `keepAllProfilesScope: false` does two jobs and the FIRST tab always carries
+  // it: cross-profile it IS the workspace move (and nothing may be created beside
+  // it until that lands — the SDK awaits activation, so everything opened after
+  // this files into the profile that is now visible); same-profile the move is a
+  // no-op but the SCOPE still collapses, which is what removes every other
+  // profile's tabs from the strip (Pedro, 2026-10-17).
+  // A caller that ALREADY moved the app (`options.moved`) must not send a second
+  // dialing open: the SDK rejects one ("superseded by a newer selection"), and the
+  // scope is collapsed already by the move it made.
+  const flagship = options.moved ? null : { keepAllProfilesScope: false }
+
+  if (!flagship) {
     dock.forEach(session => open(session))
 
     return Promise.resolve(dock.length)
   }
 
-  // Cross-profile: the FIRST tab carries the switch, and nothing may be created
-  // beside it until that move has landed — the SDK awaits the activation before
-  // it navigates (`requireActiveProfileForHydration`), so everything opened after
-  // this resolves files into the profile that is now visible.
-  const [first, ...rest] = dock
+  if (!profileIsActive(name)) {
+    return open(firstTab, flagship).then(rest)
+  }
 
-  return open(first, switching).then(() => {
-    rest.forEach(session => open(session))
+  open(firstTab, flagship)
 
-    return dock.length
-  })
+  return Promise.resolve(rest())
 }
 
 /** D-D, the open half: the profile's NEWEST session takes the main pane while
@@ -3637,7 +3649,12 @@ function openSessionInProfile(profile, sessions, openId) {
   }
 
   if (String(host.state.profile.get() || '') === name) {
-    return openSession(id, name)
+    // No move to make — but the SCOPE still has to be set. `keepAllProfilesScope:
+    // false` also carries `showAllProfiles(false)`, which is what makes the strip
+    // show THIS profile's tabs alone. Without it a click under the active profile
+    // leaves every other profile's tabs on the strip (Pedro, 2026-10-17: "when the
+    // user clicks on another profile, the existing ones vanish").
+    return openSession(id, name, null, { expectHistory: true, keepAllProfilesScope: false })
   }
 
   // The order is the fix, in three steps:
@@ -3650,7 +3667,7 @@ function openSessionInProfile(profile, sessions, openId) {
   //     the user was seeing, deterministically, on every cross-profile click
   //     (the second click takes the same-profile path above and docks nothing).
   return openSession(id, name, null, { expectHistory: true, keepAllProfilesScope: false })
-    .then(() => dockSessions(name, sessions, id))
+    .then(() => dockSessions(name, sessions, id, { moved: true }))
     .then(() => reassertOpen(name, id)
   )
 }
@@ -7456,7 +7473,7 @@ function NameField({ initial, label, onCancel, onSubmit, submitLabel }) {
   }
 
   return jsxs('div', {
-    className: 'mx-1.5 my-0.5 flex min-w-0 items-center gap-1',
+    className: 'mx-1.5 mt-0.5 mb-0.5 flex min-w-0 items-center gap-1',
     children: [
       jsx(
         Input,

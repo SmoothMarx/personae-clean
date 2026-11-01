@@ -117,6 +117,15 @@ export const host = {
     const landing = h.openLandsOn
     h.openLandsOn = null
     host.state.focusedStoredSessionId.set(landing ?? id)
+
+    // An open carrying `keepAllProfilesScope: false` is the workspace switch
+    // (`planPluginOpenSession`): once it resolves the app IS on that profile. The
+    // stub has to agree, or a later decision reads the profile the test started
+    // on — and a dock that only sets the scope when the profile is already active
+    // can never be observed.
+    if (options?.keepAllProfilesScope === false && options?.profile) {
+      host.state.profile.set(String(options.profile))
+    }
   },
   /** Sessions of another profile, read through the source primary. */
   async listPersistedSessions(route, options) {

@@ -2774,8 +2774,10 @@ h.opens.length = 0
 await __internals.dockSessions('zulu', many(3))
 
 check(
-  'a dock inside the profile the app is already on moves nothing',
-  h.opens.length === 3 && h.opens.every(entry => entry.options.keepAllProfilesScope === true),
+  'a dock inside the active profile still collapses the SCOPE onto it',
+  h.opens.length === 3 &&
+    h.opens[0].options.keepAllProfilesScope === false &&
+    h.opens.slice(1).every(entry => entry.options.keepAllProfilesScope === true),
   JSON.stringify(h.opens.map(entry => entry.options.keepAllProfilesScope))
 )
 
@@ -2883,7 +2885,7 @@ check(
   JSON.stringify(dockedTabs.map(entry => entry.id))
 )
 check(
-  'and the dock adds no second switch — the move already happened',
+  'and only the FIRST tab carries the scope change — the rest dock in place',
   dockedTabs.every(entry => entry.options.keepAllProfilesScope === true),
   JSON.stringify(dockedTabs.map(entry => entry.options.keepAllProfilesScope))
 )
@@ -2900,11 +2902,11 @@ h.opens.length = 0
 await __internals.openSessionInProfile('zulu', many(14), 'r-5')
 
 check(
-  'a click inside the current profile just opens the session',
+  'a click inside the active profile opens it AND collapses the scope onto that profile',
   h.opens.length === 1 &&
     h.opens[0].id === 'r-5' &&
     h.opens[0].options.intent === undefined &&
-    h.opens[0].options.keepAllProfilesScope === undefined,
+    h.opens[0].options.keepAllProfilesScope === false,
   JSON.stringify(h.opens)
 )
 
@@ -7764,8 +7766,8 @@ h.rest.byProfile = {}
   await __internals.openSessionInProfile('zulu', sessions, 'r-2')
 
   check(
-    'a click INSIDE the active profile stays a single open',
-    h.opens.length === 1 && h.opens[0].id === 'r-2' && h.opens[0].options.keepAllProfilesScope === undefined,
+    'a click INSIDE the active profile is still ONE open — with the scope collapsed',
+    h.opens.length === 1 && h.opens[0].id === 'r-2' && h.opens[0].options.keepAllProfilesScope === false,
     JSON.stringify(h.opens)
   )
 
