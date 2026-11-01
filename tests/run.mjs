@@ -2699,9 +2699,9 @@ h.opens.length = 0
 await __internals.openProfileSessions(fakeRow, many(3))
 
 check(
-  'clicking a profile opens its newest session in the main pane',
+  'clicking a profile opens its newest session in the main pane — by STORED id',
   h.opens.length === 3 &&
-    h.opens[2].id === 'r-0' &&
+    h.opens[2].id === 's-0' &&
     h.opens[2].options.intent === 'main' &&
     h.opens[2].options.profile === 'zulu',
   JSON.stringify(h.opens)
@@ -2741,8 +2741,8 @@ check(
   String(dockedCount)
 )
 check(
-  'a session opens under its resolved runtime id when it has one',
-  h.opens[0].id === 'r-0',
+  'a TAB opens under the session’s STORED id — a runtime id names no row, so the strip says “New session”',
+  h.opens[0].id === 's-0' && h.opens[0].id !== 'r-0',
   h.opens[0]?.id
 )
 
@@ -2892,7 +2892,7 @@ check(
 check(
   'and the docked set is the list in order, capped at the dock limit',
   JSON.stringify(dockedTabs.map(entry => entry.id)) ===
-    JSON.stringify(['r-0', 'r-1', 'r-2', 'r-4', 'r-5', 'r-6', 'r-7', 'r-8', 'r-9', 'r-10'])
+    JSON.stringify(['s-0', 's-1', 's-2', 's-4', 's-5', 's-6', 's-7', 's-8', 's-9', 's-10'])
 )
 
 // A click INSIDE the profile the app is already on stays what it always was:
@@ -7780,7 +7780,7 @@ h.rest.byProfile = {}
 
   check(
     'opening a whole profile still finishes on its main session, with no extra open',
-    h.opens.length === 2 && h.opens[1].options.intent === 'main' && host.state.focusedStoredSessionId.get() === 'r-0',
+    h.opens.length === 2 && h.opens[1].options.intent === 'main' && host.state.focusedStoredSessionId.get() === 's-0',
     JSON.stringify(h.opens.map(entry => `${entry.id}:${entry.options.intent || 'switch'}`))
   )
 
@@ -8014,6 +8014,47 @@ h.rest.byProfile = {}
       toolbar.includes("name: 'files'"),
     toolbar.slice(0, 300)
   )
+}
+
+// ── "Session not found" must mean the SESSION, never a missing route ────────
+{
+  // 1. Route not mounted (an older backend half): say THAT.
+  h.rest.byProfile = { zulu: new Error('404 Not Found') }
+  h.requests.length = 0
+
+  let said = ''
+
+  try {
+    await __internals.renameSession({ id: 'sess-zulu-9' }, 'zulu', 'anything')
+  } catch (error) {
+    said = String(error.message || error)
+  }
+
+  check(
+    'a missing /title route says RESTART, not "Session not found"',
+    /does not serve \/title/i.test(said) && /restart/i.test(said) && h.requests.length === 0,
+    said
+  )
+
+  // 2. The store does not know a STORED-shaped id: do not hand it to the gateway
+  //    (it answers "Session not found" for every one, and that sentence lies).
+  h.rest.byProfile = { zulu: { detail: 'no session 20260101_000000_abc123 in zulu', error: 'session_not_found' } }
+  h.requests.length = 0
+  said = ''
+
+  try {
+    await __internals.renameSession({ id: '20260101_000000_abc123' }, 'zulu', 'anything')
+  } catch (error) {
+    said = String(error.message || error)
+  }
+
+  check(
+    'a stored-shaped id the store does not have is reported as missing, with no doomed RPC',
+    /no session 20260101_000000_abc123/.test(said) && h.requests.length === 0,
+    said
+  )
+
+  h.rest.byProfile = {}
 }
 
 const failedNow = results.filter(r => !r.ok)

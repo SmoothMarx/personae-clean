@@ -3466,6 +3466,17 @@ function sessionIdOf(session) {
   return String(session?.resolved_id || session?.id || '')
 }
 
+/** The id a TAB must be opened with.
+ *
+ *  `host.openSession` takes a STORED id (`storedSessionId` in the SDK), and a
+ *  tile resolves its caption through the loaded session list BY STORED ID. Open a
+ *  tab with a runtime id and there is no row to name it, so the strip keeps
+ *  core's placeholder — "New session", on most tabs (Pedro, 2026-10-17).
+ *  `sessionIdOf` still prefers the live id where the RPC genuinely needs it. */
+function storedIdOf(session) {
+  return String(session?.id || session?.resolved_id || '')
+}
+
 /** D-D, the dock half: put a profile's recent sessions on the tab strip, capped.
  *  Each open carries its own profile — a bare id would land in the app's own
  *  profile, which is exactly the bug this pane exists to avoid.
@@ -3506,7 +3517,13 @@ function dockSessions(profile, sessions, exceptOpenId = null, options = {}) {
   const name = String(profile || '')
   const except = String(exceptOpenId || '')
   const dock = (sessions || [])
-    .filter(session => sessionIdOf(session) && sessionIdOf(session) !== except)
+    .filter(
+      session =>
+        storedIdOf(session) &&
+        storedIdOf(session) !== except &&
+        // The click may hand over either id shape; neither may be docked twice.
+        sessionIdOf(session) !== except
+    )
     .slice(0, DOCK_LIMIT)
 
   if (!name || !dock.length) {
@@ -3514,7 +3531,7 @@ function dockSessions(profile, sessions, exceptOpenId = null, options = {}) {
   }
 
   const open = (session, flags) =>
-    openSession(sessionIdOf(session), name, 'tab', flags ? { ...INTENT_OPEN, ...flags } : INTENT_OPEN)
+    openSession(storedIdOf(session), name, 'tab', flags ? { ...INTENT_OPEN, ...flags } : INTENT_OPEN)
   const [firstTab, ...restTabs] = dock
   const rest = () => {
     restTabs.forEach(session => open(session))
@@ -3553,7 +3570,7 @@ function dockSessions(profile, sessions, exceptOpenId = null, options = {}) {
  *  focuses its own tile, so the session the user clicked for has to be the one
  *  that ends up in front of them. */
 function openProfileSessions(row, sessions) {
-  const list = (sessions || []).filter(session => sessionIdOf(session))
+  const list = (sessions || []).filter(session => storedIdOf(session))
   const [newest, ...rest] = list.slice(0, DOCK_LIMIT)
 
   if (!newest) {
@@ -3566,10 +3583,10 @@ function openProfileSessions(row, sessions) {
   // second reason: when this profile is not the one on screen, the dock's first
   // tab is what MOVES the app there, and the main open must not be created
   // before that has landed (see `switchingFlags`).
-  const openMain = () => openSession(sessionIdOf(newest), name, 'main', rest.length ? null : switchingFlags(name))
+  const openMain = () => openSession(storedIdOf(newest), name, 'main', rest.length ? null : switchingFlags(name))
   // …and the main open can be undone by the very switch it rides on, exactly
   // like a cross-profile session click (see reassertOpen).
-  const settle = () => reassertOpen(name, sessionIdOf(newest))
+  const settle = () => reassertOpen(name, storedIdOf(newest))
 
   return (rest.length ? dockSessions(name, rest).then(openMain) : Promise.resolve(openMain())).then(settle)
 }
@@ -3938,7 +3955,18 @@ async function renameSession(session, profile, title) {
   }
 
   const stored = Boolean(answer) && !answer.error
-  const missing = answer?.error === 'session_not_found' || (!answer && /\b40[34]\b/.test(said))
+  const missing = answer?.error === 'session_not_found'
+  // A 403/404 with NO answer body is the ROUTE, not the session: an older backend
+  // half predates /title. Falling through to the RPC in that state produced the
+  // gateway's own "Session not found" for a session that exists — the exact
+  // message Pedro kept seeing (2026-10-17).
+  const routeMissing = !answer && /\b40[34]\b/.test(said)
+
+  if (routeMissing) {
+    throw new Error(
+      `Rename failed — the Personae backend half does not serve /title yet (restart it): ${said || 'no answer'}`
+    )
+  }
 
   // A chat created in this window can exist ONLY as a live session: nothing has
   // written a row yet, so the stored door answers "no such session" and the
@@ -3948,7 +3976,16 @@ async function renameSession(session, profile, title) {
     // it is the gateway's own id for a chat that has not been written yet. Try
     // the gateway with it — this is the "until it has answered me" case — and
     // only then admit that neither door knows it.
-    const candidate = liveId || storedId
+    // Never hand the gateway an id that is shaped like a STORED id: it answers
+    // "Session not found" for every one of them, and that sentence then reads as
+    // the pane's own failure. A stored-shaped id that the store does not know is
+    // simply a session that is not there.
+    const storedShaped = /^\d{8}_\d{6}_[A-Za-z0-9]+$/.test(storedId)
+    const candidate = liveId || (storedShaped ? '' : storedId)
+
+    if (!candidate) {
+      throw new Error(String(answer?.detail || `Could not rename this session (${storedId || 'no id'}).`))
+    }
 
     try {
       await host.request('session.title', { session_id: candidate, title: name })
